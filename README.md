@@ -1,25 +1,19 @@
+
 # PostgreSQL Range Partitioning for `events` Table
 
-This guide explains how to migrate the `events` table to **PostgreSQL range partitioning** and how to automatically create new partitions using a Bash script.
+This guide explains how to migrate the `events` table in Zabbix's PostgreSQL database to use **range partitioning** by `eventid`.  
+Partitioning improves query performance, reduces table bloat, and speeds up cleanup and archival.
 
 ---
 
 ## 1️⃣ Migration Steps
 
-**Step 1 – Backup the table**
+### Step 1 – Backup the Table
 ```bash
 pg_dump -U zabbix -t events zabbix > events_backup.sql
 ```
 
-# PostgreSQL Partitioning for Zabbix `events` Table
-
-## 📌 Overview
-This migration converts the `events` table in Zabbix's PostgreSQL database into a **range-partitioned table** based on `eventid`.  
-Partitioning improves query performance, reduces table bloat, and makes cleanup/archival faster.
-
-## 🛠 Steps Performed
-
-### 1. Create Partitioned Table
+### Step 2 – Create Partitioned Table
 ```sql
 CREATE TABLE events_new (
     eventid BIGINT NOT NULL,
@@ -35,44 +29,45 @@ CREATE TABLE events_new (
 ) PARTITION BY RANGE (eventid);
 ```
 
-### 2. Create Partitions
+### Step 3 – Create Partitions
 ```sql
 CREATE TABLE events_p1 PARTITION OF events_new FOR VALUES FROM (0) TO (100000000);
 CREATE TABLE events_p2 PARTITION OF events_new FOR VALUES FROM (100000000) TO (200000000);
 CREATE TABLE events_p3 PARTITION OF events_new FOR VALUES FROM (200000000) TO (300000000);
 ```
 
-### 3. Migrate Data
+### Step 4 – Migrate Data
 ```sql
 INSERT INTO events_new SELECT * FROM events;
 ```
 
-### 4. Swap Old and New Tables
+### Step 5 – Swap Old and New Tables
 ```sql
 ALTER TABLE events RENAME TO events_old;
 ALTER TABLE events_new RENAME TO events;
 ```
 
-### 5. Recreate Indexes
+### Step 6 – Recreate Indexes
 ```sql
 CREATE INDEX idx_events_clock ON events (clock);
 CREATE INDEX idx_events_objectid ON events (objectid);
 ```
 
-### 6. Add Primary Key
+### Step 7 – Add Primary Key
 ```sql
 ALTER TABLE events ADD PRIMARY KEY (eventid);
 ```
 
-### 7. Update Foreign Keys
-Example:
+### Step 8 – Update Foreign Keys
+Example for `event_tag` table:
 ```sql
 ALTER TABLE event_tag DROP CONSTRAINT c_event_tag_1;
+
 ALTER TABLE event_tag
   ADD CONSTRAINT c_event_tag_1 FOREIGN KEY (eventid)
   REFERENCES events (eventid) ON DELETE CASCADE;
 ```
-Repeat for:
+Repeat similar steps for other tables and constraints:
 - `problem` (`c_problem_1`, `c_problem_2`)
 - `alerts` (`c_alerts_2`, `c_alerts_5`)
 - `acknowledges` (`c_acknowledges_2`)
@@ -82,14 +77,16 @@ Repeat for:
 ---
 
 ## ✅ Verification
-After migration, run:
+
+Check created partitions:
 ```sql
--- Check partitions
 SELECT inhrelid::regclass AS partition_name
 FROM pg_inherits
 WHERE inhparent = 'events'::regclass;
+```
 
--- Count rows
+Check row counts:
+```sql
 SELECT relname, n_live_tup
 FROM pg_stat_user_tables
 WHERE relname LIKE 'events%';
@@ -97,29 +94,12 @@ WHERE relname LIKE 'events%';
 
 ---
 
-## 🗑 Optional/Debug Commands
-These were useful during development but are **not required** for migration:
-```sql
-SELECT COUNT(*) FROM events;
-SELECT MAX(eventid), clock FROM events;
-SELECT column_name, column_default
-FROM information_schema.columns
-WHERE table_name IN ('events_p1', 'events_p2', 'events_p3')
-  AND column_name = 'acknowledged';
-```
-
----
-
 ## 2️⃣ Auto-Partition Script (`auto_partition.sh`)
 
-This Bash script checks for the latest partition and creates the next month’s partition automatically.
-PostgreSQL does not automatically create partitions when a range is full.  
-This script checks the highest `eventid` and creates a new partition if needed.
-
+PostgreSQL does **not** auto-create partitions when ranges fill up.  
+Use this Bash script to check the highest `eventid` and create new partitions automatically.
 
 ```bash
-
-### Bash Script
 #!/bin/bash
 # Auto-create new partition for Zabbix events table if needed
 
@@ -137,8 +117,10 @@ MAX_EVENTID=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COALESCE(MAX(eventi
 NEXT_START=$(( (MAX_EVENTID / PARTITION_SIZE) * PARTITION_SIZE ))
 NEXT_END=$(( NEXT_START + PARTITION_SIZE ))
 
-# Check if partition already exists
+# Determine partition name
 PARTITION_NAME="${PARENT_TABLE}_p$((NEXT_START / PARTITION_SIZE + 1))"
+
+# Check if partition exists
 EXISTS=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT to_regclass('$PARTITION_NAME');" | tr -d '[:space:]')
 
 if [ "$EXISTS" = "" ] || [ "$EXISTS" = "null" ]; then
@@ -147,30 +129,42 @@ if [ "$EXISTS" = "" ] || [ "$EXISTS" = "null" ]; then
 else
     echo "Partition $PARTITION_NAME already exists. No action taken."
 fi
+
 unset PGPASSWORD
 ```
 
 ---
----
 
 ## ⚠️ Notes & Warnings
-- Perform this migration during a maintenance window — **no inserts/updates** to `events` should happen during the copy step.
-- Test on staging before production.
-- Keep `events_old` until you verify the migration.
-- Dropping/re-adding foreign keys is **mandatory** so child tables point to the new partitioned `events`.
+
+- Perform this migration during a maintenance window; **no inserts/updates** to `events` should occur during data migration.
+- Always test on a staging environment before production.
+- Keep the `events_old` table until the migration is verified.
+- Dropping and re-adding foreign keys is **mandatory** to ensure child tables reference the new partitioned `events`.
+- Adjust `PGPASSWORD` handling for your security policies.
 
 ---
 
 ## 3️⃣ Optional / Debug Commands
 
-Check all partitions:
+List all `events` partitions:
 ```bash
 \dt events_*
 ```
 
-Check partition details:
+View partition details:
 ```sql
 SELECT * FROM pg_partitions WHERE tablename LIKE 'events_%';
 ```
 
+Count rows in main and partitions:
+```sql
+SELECT COUNT(*) FROM events;
+SELECT COUNT(*) FROM events_p1;
+SELECT COUNT(*) FROM events_p2;
+SELECT COUNT(*) FROM events_p3;
+```
+
 ---
+
+*End of Guide*
