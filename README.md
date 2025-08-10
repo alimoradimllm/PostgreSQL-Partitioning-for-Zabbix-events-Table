@@ -166,5 +166,3 @@ SELECT COUNT(*) FROM events_p3;
 ```
 
 ---
-
-*End of Guide*
