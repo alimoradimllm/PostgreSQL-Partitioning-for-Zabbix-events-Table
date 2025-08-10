@@ -94,13 +94,6 @@ fi
 unset PGPASSWORD
 ```
 
-💡 **Password Handling**  
-To avoid entering the DB password every time:  
-```bash
-export PGPASSWORD="your_password"
-```
-Or configure `~/.pgpass` for secure storage.
-
 ---
 
 ## 3️⃣ Optional / Debug Commands
