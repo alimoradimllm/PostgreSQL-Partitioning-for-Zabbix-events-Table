@@ -57,16 +57,17 @@ DROP TABLE events_old;
 ## 2️⃣ Auto-Partition Script (`auto_partition.sh`)
 
 This Bash script checks for the latest partition and creates the next month’s partition automatically.
-
-```bash
-## 🔄 Automatic Partition Creation
-
 PostgreSQL does not automatically create partitions when a range is full.  
 This script checks the highest `eventid` and creates a new partition if needed.
+
+
+```bash
 
 ### Bash Script
 #!/bin/bash
 # Auto-create new partition for Zabbix events table if needed
+
+export PGPASSWORD="your_password"
 
 DB_NAME="zabbix"
 DB_USER="postgres"
@@ -90,7 +91,7 @@ if [ "$EXISTS" = "" ] || [ "$EXISTS" = "null" ]; then
 else
     echo "Partition $PARTITION_NAME already exists. No action taken."
 fi
-
+unset PGPASSWORD
 ```
 
 💡 **Password Handling**  
