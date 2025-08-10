@@ -74,6 +74,73 @@ Repeat similar steps for other tables and constraints:
 - `event_recovery` (`c_event_recovery_1`, `c_event_recovery_2`, `c_event_recovery_3`)
 - `event_suppress` (`c_event_suppress_1`)
 
+Example: event_tag Table
+ALTER TABLE event_tag DROP CONSTRAINT c_event_tag_1;
+
+ALTER TABLE event_tag
+  ADD CONSTRAINT c_event_tag_1 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+problem Table:
+
+ALTER TABLE problem DROP CONSTRAINT c_problem_1;
+ALTER TABLE problem DROP CONSTRAINT c_problem_2;
+
+ALTER TABLE problem
+  ADD CONSTRAINT c_problem_1 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+ALTER TABLE problem
+  ADD CONSTRAINT c_problem_2 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+alerts Table:
+ALTER TABLE alerts DROP CONSTRAINT c_alerts_2;
+ALTER TABLE alerts DROP CONSTRAINT c_alerts_5;
+
+ALTER TABLE alerts
+  ADD CONSTRAINT c_alerts_2 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+ALTER TABLE alerts
+  ADD CONSTRAINT c_alerts_5 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+acknowledges Table:
+ALTER TABLE acknowledges DROP CONSTRAINT c_acknowledges_2;
+
+ALTER TABLE acknowledges
+  ADD CONSTRAINT c_acknowledges_2 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+
+event_recovery Table:
+ALTER TABLE event_recovery DROP CONSTRAINT c_event_recovery_1;
+ALTER TABLE event_recovery DROP CONSTRAINT c_event_recovery_2;
+ALTER TABLE event_recovery DROP CONSTRAINT c_event_recovery_3;
+
+ALTER TABLE event_recovery
+  ADD CONSTRAINT c_event_recovery_1 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+ALTER TABLE event_recovery
+  ADD CONSTRAINT c_event_recovery_2 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+ALTER TABLE event_recovery
+  ADD CONSTRAINT c_event_recovery_3 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+event_suppress Table:
+ALTER TABLE event_suppress DROP CONSTRAINT c_event_suppress_1;
+
+ALTER TABLE event_suppress
+  ADD CONSTRAINT c_event_suppress_1 FOREIGN KEY (eventid)
+  REFERENCES events (eventid) ON DELETE CASCADE;
+
+Note: Replace constraint names if they differ in your schema. You can find them using:
+SELECT conname FROM pg_constraint WHERE conrelid = 'table_name'::regclass;
+
 ---
 
 ## ✅ Verification
