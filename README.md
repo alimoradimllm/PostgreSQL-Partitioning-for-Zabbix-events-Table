@@ -65,7 +65,6 @@ PostgreSQL does not automatically create partitions when a range is full.
 This script checks the highest `eventid` and creates a new partition if needed.
 
 ### Bash Script
-```bash
 #!/bin/bash
 # Auto-create new partition for Zabbix events table if needed
 
