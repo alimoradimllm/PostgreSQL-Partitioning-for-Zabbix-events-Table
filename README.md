@@ -59,7 +59,10 @@ ALTER TABLE events ADD PRIMARY KEY (eventid);
 ```
 
 ### Step 8 – Update Foreign Keys
-Example for `event_tag` table:
+
+After swapping the tables, drop and recreate foreign key constraints on child tables to reference the new partitioned `events` table.
+
+#### `event_tag` Table
 ```sql
 ALTER TABLE event_tag DROP CONSTRAINT c_event_tag_1;
 
@@ -67,22 +70,9 @@ ALTER TABLE event_tag
   ADD CONSTRAINT c_event_tag_1 FOREIGN KEY (eventid)
   REFERENCES events (eventid) ON DELETE CASCADE;
 ```
-Repeat similar steps for other tables and constraints:
-- `problem` (`c_problem_1`, `c_problem_2`)
-- `alerts` (`c_alerts_2`, `c_alerts_5`)
-- `acknowledges` (`c_acknowledges_2`)
-- `event_recovery` (`c_event_recovery_1`, `c_event_recovery_2`, `c_event_recovery_3`)
-- `event_suppress` (`c_event_suppress_1`)
 
-Example: event_tag Table
-ALTER TABLE event_tag DROP CONSTRAINT c_event_tag_1;
-
-ALTER TABLE event_tag
-  ADD CONSTRAINT c_event_tag_1 FOREIGN KEY (eventid)
-  REFERENCES events (eventid) ON DELETE CASCADE;
-
-problem Table:
-
+#### `problem` Table
+```sql
 ALTER TABLE problem DROP CONSTRAINT c_problem_1;
 ALTER TABLE problem DROP CONSTRAINT c_problem_2;
 
@@ -93,8 +83,10 @@ ALTER TABLE problem
 ALTER TABLE problem
   ADD CONSTRAINT c_problem_2 FOREIGN KEY (eventid)
   REFERENCES events (eventid) ON DELETE CASCADE;
+```
 
-alerts Table:
+#### `alerts` Table
+```sql
 ALTER TABLE alerts DROP CONSTRAINT c_alerts_2;
 ALTER TABLE alerts DROP CONSTRAINT c_alerts_5;
 
@@ -105,16 +97,19 @@ ALTER TABLE alerts
 ALTER TABLE alerts
   ADD CONSTRAINT c_alerts_5 FOREIGN KEY (eventid)
   REFERENCES events (eventid) ON DELETE CASCADE;
+```
 
-acknowledges Table:
+#### `acknowledges` Table
+```sql
 ALTER TABLE acknowledges DROP CONSTRAINT c_acknowledges_2;
 
 ALTER TABLE acknowledges
   ADD CONSTRAINT c_acknowledges_2 FOREIGN KEY (eventid)
   REFERENCES events (eventid) ON DELETE CASCADE;
+```
 
-
-event_recovery Table:
+#### `event_recovery` Table
+```sql
 ALTER TABLE event_recovery DROP CONSTRAINT c_event_recovery_1;
 ALTER TABLE event_recovery DROP CONSTRAINT c_event_recovery_2;
 ALTER TABLE event_recovery DROP CONSTRAINT c_event_recovery_3;
@@ -130,16 +125,22 @@ ALTER TABLE event_recovery
 ALTER TABLE event_recovery
   ADD CONSTRAINT c_event_recovery_3 FOREIGN KEY (eventid)
   REFERENCES events (eventid) ON DELETE CASCADE;
+```
 
-event_suppress Table:
+#### `event_suppress` Table
+```sql
 ALTER TABLE event_suppress DROP CONSTRAINT c_event_suppress_1;
 
 ALTER TABLE event_suppress
   ADD CONSTRAINT c_event_suppress_1 FOREIGN KEY (eventid)
   REFERENCES events (eventid) ON DELETE CASCADE;
+```
 
-Note: Replace constraint names if they differ in your schema. You can find them using:
-SELECT conname FROM pg_constraint WHERE conrelid = 'table_name'::regclass;
+> **Note:** Replace constraint names if different in your schema.  
+> To find constraint names, run:
+> ```sql
+> SELECT conname FROM pg_constraint WHERE conrelid = 'table_name'::regclass;
+> ```
 
 ---
 
@@ -208,7 +209,7 @@ unset PGPASSWORD
 - Always test on a staging environment before production.
 - Keep the `events_old` table until the migration is verified.
 - Dropping and re-adding foreign keys is **mandatory** to ensure child tables reference the new partitioned `events`.
-- Adjust `PGPASSWORD` handling for your security policies.
+- Adjust `PGPASSWORD` handling to fit your security policies.
 
 ---
 
@@ -233,3 +234,5 @@ SELECT COUNT(*) FROM events_p3;
 ```
 
 ---
+
+*End of Guide*
