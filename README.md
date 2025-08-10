@@ -91,7 +91,48 @@ WHERE relname LIKE 'events%';
 - Dropping/re-adding foreign keys is **mandatory** so child tables point to the new partitioned `events`.
 
 ---
+readme_auto_partition = """# Auto Partition Creator for Zabbix Events Table
 
+## 📌 Overview
+This script checks the `events` table in a PostgreSQL Zabbix database and **automatically creates a new partition** when the current maximum `eventid` reaches the end of an existing range.
+
+Partitioning helps improve query performance and makes old data management easier.
+
+---
+
+## 🛠 Script Details
+
+**File:** `auto_partition.sh`
+
+### Bash Script
+```bash
+#!/bin/bash
+# Auto-create new partition for Zabbix events table if needed
+
+DB_NAME="zabbix"
+DB_USER="postgres"
+PARTITION_SIZE=100000000  # size of each range
+PARENT_TABLE="events"
+
+# Get current max eventid
+MAX_EVENTID=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COALESCE(MAX(eventid),0) FROM $PARENT_TABLE;" | tr -d '[:space:]')
+
+# Calculate next partition range
+NEXT_START=$(( (MAX_EVENTID / PARTITION_SIZE) * PARTITION_SIZE ))
+NEXT_END=$(( NEXT_START + PARTITION_SIZE ))
+
+# Check if partition already exists
+PARTITION_NAME="${PARENT_TABLE}_p$((NEXT_START / PARTITION_SIZE + 1))"
+EXISTS=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT to_regclass('$PARTITION_NAME');" | tr -d '[:space:]')
+
+if [ "$EXISTS" = "" ] || [ "$EXISTS" = "null" ]; then
+    echo "Creating new partition: $PARTITION_NAME for range $NEXT_START to $NEXT_END..."
+    psql -U "$DB_USER" -d "$DB_NAME" -c "CREATE TABLE $PARTITION_NAME PARTITION OF $PARENT_TABLE FOR VALUES FROM ($NEXT_START) TO ($NEXT_END);"
+else
+    echo "Partition $PARTITION_NAME already exists. No action taken."
+fi
+
+---
 ## 🗑 Optional/Debug Commands
 These were useful during development but are **not required** for migration:
 ```sql
