@@ -59,32 +59,39 @@ DROP TABLE events_old;
 This Bash script checks for the latest partition and creates the next month’s partition automatically.
 
 ```bash
+## 🔄 Automatic Partition Creation
+
+PostgreSQL does not automatically create partitions when a range is full.  
+This script checks the highest `eventid` and creates a new partition if needed.
+
+### Bash Script
+```bash
 #!/bin/bash
+# Auto-create new partition for Zabbix events table if needed
 
 DB_NAME="zabbix"
-DB_USER="zabbix"
+DB_USER="postgres"
+PARTITION_SIZE=100000000  # size of each range
+PARENT_TABLE="events"
 
-# Get latest partition name
-latest_partition=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "
-    SELECT tablename 
-    FROM pg_tables 
-    WHERE tablename LIKE 'events_%' 
-    ORDER BY tablename DESC LIMIT 1;
-" | xargs)
+# Get current max eventid
+MAX_EVENTID=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COALESCE(MAX(eventid),0) FROM $PARENT_TABLE;" | tr -d '[:space:]')
 
-# Extract year and month
-year_month=$(echo "$latest_partition" | sed -E 's/events_([0-9]{4})_([0-9]{2})/\1-\2/')
-next_month=$(date -d "$year_month-01 +1 month" +"%Y-%m")
+# Calculate next partition range
+NEXT_START=$(( (MAX_EVENTID / PARTITION_SIZE) * PARTITION_SIZE ))
+NEXT_END=$(( NEXT_START + PARTITION_SIZE ))
 
-next_year=$(echo "$next_month" | cut -d- -f1)
-next_month_num=$(echo "$next_month" | cut -d- -f2)
+# Check if partition already exists
+PARTITION_NAME="${PARENT_TABLE}_p$((NEXT_START / PARTITION_SIZE + 1))"
+EXISTS=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT to_regclass('$PARTITION_NAME');" | tr -d '[:space:]')
 
-# Create next partition
-psql -U "$DB_USER" -d "$DB_NAME" -c "
-CREATE TABLE events_${next_year}_${next_month_num} PARTITION OF events
-FOR VALUES FROM (EXTRACT(EPOCH FROM TIMESTAMP '${next_year}-${next_month_num}-01 00:00:00')::BIGINT)
-TO (EXTRACT(EPOCH FROM TIMESTAMP '$(date -d "$next_month-01 +1 month" +"%Y-%m-%d") 00:00:00')::BIGINT);
-"
+if [ "$EXISTS" = "" ] || [ "$EXISTS" = "null" ]; then
+    echo "Creating new partition: $PARTITION_NAME for range $NEXT_START to $NEXT_END..."
+    psql -U "$DB_USER" -d "$DB_NAME" -c "CREATE TABLE $PARTITION_NAME PARTITION OF $PARENT_TABLE FOR VALUES FROM ($NEXT_START) TO ($NEXT_END);"
+else
+    echo "Partition $PARTITION_NAME already exists. No action taken."
+fi
+
 ```
 
 💡 **Password Handling**  
