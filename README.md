@@ -1,145 +1,111 @@
-# PostgreSQL Partitioning for Zabbix `events` Table
+# PostgreSQL Range Partitioning for `events` Table
 
-## 📌 Overview
-This migration converts the `events` table in Zabbix's PostgreSQL database into a **range-partitioned table** based on `eventid`.  
-Partitioning improves query performance, reduces table bloat, and makes cleanup/archival faster.
+This guide explains how to migrate the `events` table to **PostgreSQL range partitioning** and how to automatically create new partitions using a Bash script.
 
-## 🛠 Steps Performed
+---
 
-### 1. Create Partitioned Table
+## 1️⃣ Migration Steps
+
+**Step 1 – Backup the table**
+```bash
+pg_dump -U zabbix -t events zabbix > events_backup.sql
+```
+
+**Step 2 – Create a new partitioned table**
 ```sql
 CREATE TABLE events_new (
-    eventid BIGINT NOT NULL,
+    eventid BIGSERIAL PRIMARY KEY,
     source INTEGER NOT NULL,
     object INTEGER NOT NULL,
     objectid BIGINT NOT NULL,
     clock INTEGER NOT NULL,
     value INTEGER NOT NULL,
     acknowledged INTEGER NOT NULL,
-    ns INTEGER NOT NULL,
-    name VARCHAR(255),
-    severity INTEGER DEFAULT 0
-) PARTITION BY RANGE (eventid);
+    ns INTEGER NOT NULL
+) PARTITION BY RANGE (clock);
 ```
 
-### 2. Create Partitions
+**Step 3 – Create partitions (one per month)**
 ```sql
-CREATE TABLE events_p1 PARTITION OF events_new FOR VALUES FROM (0) TO (100000000);
-CREATE TABLE events_p2 PARTITION OF events_new FOR VALUES FROM (100000000) TO (200000000);
-CREATE TABLE events_p3 PARTITION OF events_new FOR VALUES FROM (200000000) TO (300000000);
+CREATE TABLE events_2025_08 PARTITION OF events_new
+FOR VALUES FROM (UNIX_TIMESTAMP('2025-08-01 00:00:00')) 
+TO (UNIX_TIMESTAMP('2025-09-01 00:00:00'));
+
+CREATE TABLE events_2025_09 PARTITION OF events_new
+FOR VALUES FROM (UNIX_TIMESTAMP('2025-09-01 00:00:00')) 
+TO (UNIX_TIMESTAMP('2025-10-01 00:00:00'));
 ```
 
-### 3. Migrate Data
+**Step 4 – Copy existing data**
 ```sql
 INSERT INTO events_new SELECT * FROM events;
 ```
 
-### 4. Swap Old and New Tables
+**Step 5 – Swap the tables**
 ```sql
 ALTER TABLE events RENAME TO events_old;
 ALTER TABLE events_new RENAME TO events;
 ```
 
-### 5. Recreate Indexes
+**Step 6 – Drop the old table (optional)**
 ```sql
-CREATE INDEX idx_events_clock ON events (clock);
-CREATE INDEX idx_events_objectid ON events (objectid);
-```
-
-### 6. Add Primary Key
-```sql
-ALTER TABLE events ADD PRIMARY KEY (eventid);
-```
-
-### 7. Update Foreign Keys
-Example:
-```sql
-ALTER TABLE event_tag DROP CONSTRAINT c_event_tag_1;
-ALTER TABLE event_tag
-  ADD CONSTRAINT c_event_tag_1 FOREIGN KEY (eventid)
-  REFERENCES events (eventid) ON DELETE CASCADE;
-```
-Repeat for:
-- `problem` (`c_problem_1`, `c_problem_2`)
-- `alerts` (`c_alerts_2`, `c_alerts_5`)
-- `acknowledges` (`c_acknowledges_2`)
-- `event_recovery` (`c_event_recovery_1`, `c_event_recovery_2`, `c_event_recovery_3`)
-- `event_suppress` (`c_event_suppress_1`)
-
----
-
-## ✅ Verification
-After migration, run:
-```sql
--- Check partitions
-SELECT inhrelid::regclass AS partition_name
-FROM pg_inherits
-WHERE inhparent = 'events'::regclass;
-
--- Count rows
-SELECT relname, n_live_tup
-FROM pg_stat_user_tables
-WHERE relname LIKE 'events%';
+DROP TABLE events_old;
 ```
 
 ---
 
-## ⚠️ Notes & Warnings
-- Perform this migration during a maintenance window — **no inserts/updates** to `events` should happen during the copy step.
-- Test on staging before production.
-- Keep `events_old` until you verify the migration.
-- Dropping/re-adding foreign keys is **mandatory** so child tables point to the new partitioned `events`.
+## 2️⃣ Auto-Partition Script (`auto_partition.sh`)
 
----
-readme_auto_partition = """# Auto Partition Creator for Zabbix Events Table
+This Bash script checks for the latest partition and creates the next month’s partition automatically.
 
-## 📌 Overview
-This script checks the `events` table in a PostgreSQL Zabbix database and **automatically creates a new partition** when the current maximum `eventid` reaches the end of an existing range.
-
-Partitioning helps improve query performance and makes old data management easier.
-
----
-
-## 🛠 Script Details
-
-**File:** `auto_partition.sh`
-
-### Bash Script
 ```bash
 #!/bin/bash
-# Auto-create new partition for Zabbix events table if needed
 
 DB_NAME="zabbix"
-DB_USER="postgres"
-PARTITION_SIZE=100000000  # size of each range
-PARENT_TABLE="events"
+DB_USER="zabbix"
 
-# Get current max eventid
-MAX_EVENTID=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COALESCE(MAX(eventid),0) FROM $PARENT_TABLE;" | tr -d '[:space:]')
+# Get latest partition name
+latest_partition=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "
+    SELECT tablename 
+    FROM pg_tables 
+    WHERE tablename LIKE 'events_%' 
+    ORDER BY tablename DESC LIMIT 1;
+" | xargs)
 
-# Calculate next partition range
-NEXT_START=$(( (MAX_EVENTID / PARTITION_SIZE) * PARTITION_SIZE ))
-NEXT_END=$(( NEXT_START + PARTITION_SIZE ))
+# Extract year and month
+year_month=$(echo "$latest_partition" | sed -E 's/events_([0-9]{4})_([0-9]{2})/\1-\2/')
+next_month=$(date -d "$year_month-01 +1 month" +"%Y-%m")
 
-# Check if partition already exists
-PARTITION_NAME="${PARENT_TABLE}_p$((NEXT_START / PARTITION_SIZE + 1))"
-EXISTS=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT to_regclass('$PARTITION_NAME');" | tr -d '[:space:]')
+next_year=$(echo "$next_month" | cut -d- -f1)
+next_month_num=$(echo "$next_month" | cut -d- -f2)
 
-if [ "$EXISTS" = "" ] || [ "$EXISTS" = "null" ]; then
-    echo "Creating new partition: $PARTITION_NAME for range $NEXT_START to $NEXT_END..."
-    psql -U "$DB_USER" -d "$DB_NAME" -c "CREATE TABLE $PARTITION_NAME PARTITION OF $PARENT_TABLE FOR VALUES FROM ($NEXT_START) TO ($NEXT_END);"
-else
-    echo "Partition $PARTITION_NAME already exists. No action taken."
-fi
+# Create next partition
+psql -U "$DB_USER" -d "$DB_NAME" -c "
+CREATE TABLE events_${next_year}_${next_month_num} PARTITION OF events
+FOR VALUES FROM (EXTRACT(EPOCH FROM TIMESTAMP '${next_year}-${next_month_num}-01 00:00:00')::BIGINT)
+TO (EXTRACT(EPOCH FROM TIMESTAMP '$(date -d "$next_month-01 +1 month" +"%Y-%m-%d") 00:00:00')::BIGINT);
+"
+```
+
+💡 **Password Handling**  
+To avoid entering the DB password every time:  
+```bash
+export PGPASSWORD="your_password"
+```
+Or configure `~/.pgpass` for secure storage.
 
 ---
-## 🗑 Optional/Debug Commands
-These were useful during development but are **not required** for migration:
-```sql
-SELECT COUNT(*) FROM events;
-SELECT MAX(eventid), clock FROM events;
-SELECT column_name, column_default
-FROM information_schema.columns
-WHERE table_name IN ('events_p1', 'events_p2', 'events_p3')
-  AND column_name = 'acknowledged';
+
+## 3️⃣ Optional / Debug Commands
+
+Check all partitions:
+```bash
+\dt events_*
 ```
+
+Check partition details:
+```sql
+SELECT * FROM pg_partitions WHERE tablename LIKE 'events_%';
+```
+
+---
